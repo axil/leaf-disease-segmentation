@@ -273,7 +273,7 @@ Project Link: https://github.com/axil/leaf-disease-segmentation
 If you use this project in academic work, please cite:
 
 ```bibtex
-@software{leaf_disease_segmentation_2024,
+@software{leaf_disease_segmentation_2026,
   title = {Leaf Disease Segmentation System},
   author = {Lev Maximov},
   year = {2026},
@@ -283,3 +283,4 @@ If you use this project in academic work, please cite:
 ```
 
 <div align="center"> Made with ❤️ for ML Zoomcamp <br> ⭐ Star this repo if you found it useful! </div> ```
+
