@@ -19,6 +19,7 @@ matplotlib.use('Agg')  # Non-interactive backend for Flask
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
+
 # Import our prediction utilities
 try:
     from utils.prediction_utils import (
@@ -32,7 +33,7 @@ try:
     )
     MODELS_LOADED = True
     print("✓ Prediction utilities loaded successfully")
-except ImportError as e:
+except Exception as e:
     print(f"⚠ Could not load prediction utilities: {e}")
     print("Using mock predictions instead")
     MODELS_LOADED = False
@@ -113,7 +114,7 @@ app = Flask(__name__)
 # Configuration
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
-app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'tiff', 'bmp', 'gif'}
+app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'tiff', 'bmp', 'gif', 'css', 'js'}
 app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change in production!
 
 # Create directories

@@ -178,49 +178,52 @@ class LeafDiseasePredictor:
         # Flatten image to get all pixels
         pixels = image.reshape(-1, 3)
         
-        # Convert to HSV for additional features
-        hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
-        hsv_flat = hsv.reshape(-1, 3)
+#        # Convert to HSV for additional features
+#        hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+#        hsv_flat = hsv.reshape(-1, 3)
         
         # Extract features (match your training features!)
-        features = []
+        features_list = []
         
         for i in range(len(pixels)):
+            features = []
             # Sample pixels if needed
-            if np.random.random() > sample_rate:
-                continue
+#            if np.random.random() > sample_rate:
+#                continue
                 
             r, g, b = pixels[i]
-            h_val, s_val, v_val = hsv_flat[i]
+#            h_val, s_val, v_val = hsv_flat[i]
             
             # Feature 1: RGB values (normalized)
-            features.append([r/255.0, g/255.0, b/255.0])
+#            features.extend([r/255.0, g/255.0, b/255.0])
+            features.extend([r, g, b])
             
-            # Feature 2: HSV values (normalized)
-            features.append([h_val/179.0, s_val/255.0, v_val/255.0])
-            
-            # Feature 3: Color ratios (common in plant disease detection)
-            if g > 0:
-                features.append([r/g, b/g])
-            else:
-                features.append([0, 0])
-            
-            # Feature 4: Vegetation indices (simplified)
-            # Excess Green Index
-            exg = 2*g - r - b
-            # Normalized Difference Index
-            if (r + g + b) > 0:
-                ndi = (g - r) / (g + r + 1e-6)
-            else:
-                ndi = 0
-            
-            features.append([exg/255.0, ndi])
+#            # Feature 2: HSV values (normalized)
+#            features.extend([h_val/179.0, s_val/255.0, v_val/255.0])
+#            
+#            # Feature 3: Color ratios (common in plant disease detection)
+#            if g > 0:
+#                features.extend([r/g, b/g])
+#            else:
+#                features.extend([0, 0])
+#            
+#            # Feature 4: Vegetation indices (simplified)
+#            # Excess Green Index
+#            exg = 2*g - r - b
+#            # Normalized Difference Index
+#            if (r + g + b) > 0:
+#                ndi = (g - r) / (g + r + 1e-6)
+#            else:
+#                ndi = 0
+#            
+#            features.extend([exg/255.0, ndi])
+            features_list.append(features)
         
-        if not features:
+        if not features_list:
             # Return dummy features if no pixels sampled
-            return np.array([[0.5, 0.5, 0.5]])
+            return np.array([[0.5]*3])
         
-        return np.array(features).reshape(-1, 8)  # 8 features per pixel
+        return np.array(features_list)
     
     def extract_patch_features_rf(self, image, patch_size=16, stride=8):
         """
@@ -239,25 +242,29 @@ class LeafDiseasePredictor:
         features_list = []
         positions = []
         
-        # Slide window over image
-        for i in range(0, h - patch_size + 1, stride):
-            for j in range(0, w - patch_size + 1, stride):
+        # Slide window
+        for i in range(0, h - patch_size, patch_size//2):
+            for j in range(0, w - patch_size, patch_size//2):
                 patch = image[i:i+patch_size, j:j+patch_size]
                 
-                # Skip if patch is mostly background (black after preprocessing)
-                if np.mean(patch) < 0.1:
-                    continue
-                
-                # Extract patch features
-                patch_features = self._extract_patch_features(patch)
-                features_list.append(patch_features)
-                positions.append((i, j))
-        
-        if not features_list:
-            # Return dummy features if no valid patches
-            return np.array([[0]*9]), [(0, 0)]
+                # Only process if not all background
+                if np.mean(patch) > 0.05:
+                    # Simple features
+                    mean_rgb = patch.mean(axis=(0,1))
+                    std_rgb = patch.std(axis=(0,1))
+                    
+                    # Color ratios
+                    if mean_rgb[1] > 0:  # Avoid division by zero
+                        r_g_ratio = mean_rgb[0] / mean_rgb[1]
+                    else:
+                        r_g_ratio = 0
+                    
+                    features = np.concatenate([mean_rgb, std_rgb, [r_g_ratio]])
+                    features_list.append(features)
+                    positions.append((i, j))
         
         return np.array(features_list), positions
+    
     
     def _extract_patch_features(self, patch):
         """
@@ -334,6 +341,7 @@ class LeafDiseasePredictor:
         
         # Reshape to image (approximate - since we sampled pixels)
         h, w = image_processed.shape[:2]
+        return predictions.reshape(h, w)*leaf_mask
         pred_mask = np.zeros((h, w), dtype=np.uint8)
         
         # Distribute predictions (simplified - in reality you'd map back to pixel positions)
