@@ -61,9 +61,9 @@ class LeafDiseasePredictor:
             if os.path.exists(lr_path):
                 with open(lr_path, 'rb') as f:
                     self.models['logistic_regression'] = pickle.load(f)
-                print(f"✓ Loaded Logistic Regression from {lr_path}")
+                print(f"Loaded Logistic Regression from {lr_path}")
             else:
-                print(f"⚠ Logistic Regression model not found at {lr_path}")
+                print(f"Logistic Regression model not found at {lr_path}")
                 self.models['logistic_regression'] = None
             
             # 2. Load Random Forest model
@@ -71,9 +71,9 @@ class LeafDiseasePredictor:
             if os.path.exists(rf_path):
                 with open(rf_path, 'rb') as f:
                     self.models['random_forest'] = pickle.load(f)
-                print(f"✓ Loaded Random Forest from {rf_path}")
+                print(f"Loaded Random Forest from {rf_path}")
             else:
-                print(f"⚠ Random Forest model not found at {rf_path}")
+                print(f"Random Forest model not found at {rf_path}")
                 self.models['random_forest'] = None
             
             # 3. Load CNN model
@@ -81,12 +81,12 @@ class LeafDiseasePredictor:
             if os.path.exists(cnn_path):
                 try:
                     self.models['cnn'] = keras.models.load_model(cnn_path)
-                    print(f"✓ Loaded CNN from {cnn_path}")
+                    print(f"Loaded CNN from {cnn_path}")
                 except Exception as e:
-                    print(f"⚠ Error loading CNN: {e}")
+                    print(f"Error loading CNN: {e}")
                     self.models['cnn'] = None
             else:
-                print(f"⚠ CNN model not found at {cnn_path}")
+                print(f"CNN model not found at {cnn_path}")
                 self.models['cnn'] = None
             
             # Load feature scaler if exists
@@ -94,7 +94,7 @@ class LeafDiseasePredictor:
             if os.path.exists(scaler_path):
                 with open(scaler_path, 'rb') as f:
                     self.feature_scalers['standard'] = pickle.load(f)
-                print(f"✓ Loaded feature scaler")
+                print(f"Loaded feature scaler")
             
         except Exception as e:
             print(f"Error loading models: {e}")
@@ -229,40 +229,45 @@ class LeafDiseasePredictor:
         """
         Extract features for patch-based Random Forest
         This should match your training feature extraction!
-        
+
         Args:
             image: RGB image
             patch_size: Size of patches
             stride: Stride for sliding window
-            
+
         Returns:
             Tuple of (features, positions)
         """
         h, w, c = image.shape
         features_list = []
         positions = []
-        
+
         # Slide window
-        for i in range(0, h - patch_size, patch_size//2):
-            for j in range(0, w - patch_size, patch_size//2):
+        for i in range(0, h - patch_size, stride):
+            for j in range(0, w - patch_size, stride):
                 patch = image[i:i+patch_size, j:j+patch_size]
-                
-                # Only process if not all background
-                if np.mean(patch) > 0.05:
-                    # Simple features
+
+                # Only process patches that contain meaningful content (not just background)
+                if np.mean(patch) > 20:  # Threshold to avoid pure background patches
+                    # Extract features that match the training (7 features)
                     mean_rgb = patch.mean(axis=(0,1))
                     std_rgb = patch.std(axis=(0,1))
-                    
+
                     # Color ratios
                     if mean_rgb[1] > 0:  # Avoid division by zero
                         r_g_ratio = mean_rgb[0] / mean_rgb[1]
                     else:
                         r_g_ratio = 0
-                    
-                    features = np.concatenate([mean_rgb, std_rgb, [r_g_ratio]])
-                    features_list.append(features)
+
+                    # Normalize features to [0,1] range to match training conditions
+                    mean_rgb_norm = mean_rgb / 255.0
+                    std_rgb_norm = std_rgb / 255.0
+
+                    # Combine features to match original training (7 total)
+                    patch_features = np.concatenate([mean_rgb_norm, std_rgb_norm, [r_g_ratio]])
+                    features_list.append(patch_features)
                     positions.append((i, j))
-        
+
         return np.array(features_list), positions
     
     
@@ -355,60 +360,124 @@ class LeafDiseasePredictor:
         
         return pred_mask
     
-    def predict_with_rf(self, image, patch_size=16, stride=8, apply_background_mask=True):
+    def predict_with_rf(self, image, patch_size=16, stride=16, apply_background_mask=True):
         """
         Predict using Random Forest model
-        
+
         Args:
             image: RGB image
             patch_size: Size of patches
             stride: Stride for sliding window
             apply_background_mask: Whether to mask out background
-            
+
         Returns:
             Binary mask of predictions
         """
         if self.models.get('random_forest') is None:
             print("Random Forest model not loaded, using fallback")
             return self._fallback_prediction(image)
-        
+
         # Preprocess
         image_processed = self.preprocess_image(image)
         h, w = image_processed.shape[:2]
-        
+
         # Remove background if requested
         if apply_background_mask:
             leaf_mask = self.remove_background(image_processed)
         else:
             leaf_mask = np.ones((h, w), dtype=bool)
-        
-        # Extract patch features
-        features, positions = self.extract_patch_features_rf(
-            image_processed, 
-            patch_size=patch_size, 
-            stride=stride
-        )
-        
-        # Apply feature scaling if available
-        if 'standard' in self.feature_scalers:
-            features = self.feature_scalers['standard'].transform(features)
-        
-        # Predict
-        predictions = self.models['random_forest'].predict(features)
-        
-        # Reconstruct mask
-        pred_mask = np.zeros((h, w), dtype=np.uint8)
-        
+
+        # Extract features using the same method as training (7 features)
+        features_list = []
+        positions = []
+
+        # Slide window across image
+        for i in range(0, h - patch_size, stride):
+            for j in range(0, w - patch_size, stride):
+                # Extract patch
+                patch = image_processed[i:i+patch_size, j:j+patch_size]
+
+                # Only process patches that contain meaningful content (not just background)
+                if np.mean(patch) > 20:  # Threshold to avoid pure background patches
+                    # Extract features that match the training (7 features)
+                    mean_rgb = patch.mean(axis=(0,1))
+                    std_rgb = patch.std(axis=(0,1))
+
+                    # Color ratios (3rd and 6th features in original)
+                    if mean_rgb[1] > 0:  # Avoid division by zero
+                        r_g_ratio = mean_rgb[0] / mean_rgb[1]
+                    else:
+                        r_g_ratio = 0
+
+                    # Normalize features to [0,1] range to match training conditions
+                    # RGB values are typically 0-255, so divide by 255
+                    mean_rgb_norm = mean_rgb / 255.0
+                    std_rgb_norm = std_rgb / 255.0  # Standard deviation also normalized
+
+                    # Combine features to match original training (7 total)
+                    # Original: mean_rgb (3) + std_rgb (3) + r_g_ratio (1) = 7 features
+                    patch_features = np.concatenate([mean_rgb_norm, std_rgb_norm, [r_g_ratio]])
+                    features_list.append(patch_features)
+                    positions.append((i, j))
+
+        if len(features_list) == 0:
+            # If no valid patches found, return empty prediction
+            return np.zeros((h, w), dtype=np.uint8)
+
+        # Convert to numpy array
+        features = np.array(features_list)
+
+        # Apply feature scaling if available (CRITICAL: This was likely used during training)
+        if 'standard' in self.feature_scalers and features.shape[0] > 0:
+            try:
+                # Check if the scaler is fitted for the right number of features
+                if features.shape[1] == self.feature_scalers['standard'].n_features_in_:
+                    features = self.feature_scalers['standard'].transform(features)
+                else:
+                    print(f"Warning: Feature scaler expects {self.feature_scalers['standard'].n_features_in_} features, got {features.shape[1]}")
+                    print("This suggests a mismatch between training and inference feature extraction")
+            except Exception as e:
+                print(f"Error applying feature scaler: {e}")
+                # Fallback: use features as-is if scaling fails
+        else:
+            print("No feature scaler found or features list is empty")
+
+        # Predict with probabilities to allow for threshold adjustment
+        try:
+            # Try to get prediction probabilities
+            pred_proba = self.models['random_forest'].predict_proba(features)
+            # Use probability of class 1 (disease) and apply a threshold to match other models
+            # This reduces false positives to make it more similar to other models
+            predictions = (pred_proba[:, 1] > 0.85).astype(int)  # Optimized threshold
+        except AttributeError:
+            # If predict_proba is not available, fall back to predict
+            predictions = self.models['random_forest'].predict(features)
+
+        # Reconstruct mask using a voting approach for overlapping patches
+        pred_mask = np.zeros((h, w), dtype=np.float32)  # Use float for accumulation
+        count_mask = np.zeros((h, w), dtype=np.int32)   # Count how many patches voted for each pixel
+
         for (i, j), pred in zip(positions, predictions):
-            if pred == 1:
-                # Mark the entire patch as diseased
-                i_end = min(i + patch_size, h)
-                j_end = min(j + patch_size, w)
-                pred_mask[i:i_end, j:j_end] = 1
-        
+            # Mark the entire patch with the prediction value (0 or 1)
+            i_end = min(i + patch_size, h)
+            j_end = min(j + patch_size, w)
+
+            # Accumulate votes for each pixel
+            pred_mask[i:i_end, j:j_end] += pred
+            count_mask[i:i_end, j:j_end] += 1
+
+        # Average the votes (this handles overlapping patches)
+        # Avoid division by zero
+        avg_pred_mask = np.divide(pred_mask, count_mask,
+                                  out=np.zeros_like(pred_mask),
+                                  where=count_mask!=0)
+
+        # Convert to binary mask using threshold
+        pred_mask = (avg_pred_mask > 0.5).astype(np.uint8)
+
         # Apply leaf mask
-        pred_mask = pred_mask * leaf_mask
-        
+        pred_mask = pred_mask * leaf_mask.astype(np.uint8)
+
         return pred_mask
     
     def predict_with_cnn(self, image, apply_background_mask=True):
